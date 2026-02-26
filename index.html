@@ -157,6 +157,17 @@ main{flex:1;padding:16px;overflow-y:auto;padding-bottom:90px;}
 .btn-outline:hover{border-color:var(--p);color:var(--p);}
 .btn-outline.danger:hover{border-color:var(--danger);color:var(--danger);}
 
+/* ── Tx Filter ── */
+.txfilter{display:flex;gap:6px;padding:12px 0 8px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+.txfilter::-webkit-scrollbar{display:none;}
+.txftab{padding:5px 12px;border-radius:20px;font-size:12px;font-weight:500;background:var(--s2);color:var(--muted);cursor:pointer;white-space:nowrap;border:none;font-family:inherit;transition:all .15s;}
+.txftab.active{background:var(--text);color:var(--bg);}
+.txftab.p-act{background:var(--p);color:#fff;}
+.txftab.j-act{background:var(--j);color:#fff;}
+.txdate-header{display:flex;justify-content:space-between;align-items:baseline;padding:8px 0 4px;border-bottom:1px solid var(--border);margin-bottom:2px;}
+.txdate-label{font-size:12px;font-weight:600;color:var(--muted);}
+.txdate-sum{font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);}
+
 /* ── Income ── */
 .b-income{background:#E8F8EF;color:#1A7A45;}
 .income-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);}
@@ -289,6 +300,7 @@ main{flex:1;padding:16px;overflow-y:auto;padding-bottom:90px;}
 
 <!-- ══ TRANSACTIONS ══ -->
 <div class="page" id="page-transactions">
+  <div class="txfilter" id="txfilter"></div>
   <div id="tx-p"></div>
   <div id="tx-j" style="display:none"></div>
 </div>
@@ -484,6 +496,7 @@ const DEF_P=[
   {name:'유지비',emoji:'🔧',budgetType:'avg',seedAmt:0,seedMonths:0},
   {name:'할부',emoji:'💳',budgetType:'fixed',seedAmt:0,seedMonths:0},
   {name:'기타',emoji:'📦',budgetType:'avg',seedAmt:0,seedMonths:0},
+  {name:'미설정',emoji:'❓',budgetType:'avg',seedAmt:0,seedMonths:0},
 ];
 
 // 적금 하위항목 = DEF_ASSETS와 동일 순서
@@ -497,6 +510,7 @@ const DEF_J=[
   {name:'문화',emoji:'🎬',budgetType:'avg',seedAmt:0,seedMonths:0},
   {name:'대출',emoji:'🏦',budgetType:'fixed',seedAmt:0,seedMonths:0},
   {name:'기타',emoji:'📦',budgetType:'avg',seedAmt:0,seedMonths:0},
+  {name:'미설정',emoji:'❓',budgetType:'avg',seedAmt:0,seedMonths:0},
 ];
 
 // ═══════════════════════════════════════════════
@@ -545,6 +559,11 @@ let S = (() => {
       (p.jCats||[]).forEach(c => { if (!c.budgetType) c.budgetType = 'avg'; });
       // budgets 스냅샷은 ensureMonthBudgets()에서 자동 생성
       if (!p.assetLinks) p.assetLinks = {};
+      // 마이그레이션: 미설정 카테고리 추가
+      if (!p.pCats.find(c=>c.name==='미설정'))
+        p.pCats.push({name:'미설정',emoji:'❓',budgetType:'avg',seedAmt:0,seedMonths:0,color:'#9CA3AF'});
+      if (!p.jCats.find(c=>c.name==='미설정'))
+        p.jCats.push({name:'미설정',emoji:'❓',budgetType:'avg',seedAmt:0,seedMonths:0,color:'#9CA3AF'});
       // 마이그레이션: 청약 카테고리 → 적금으로 rename
       p.txs = (p.txs||[]).map(x => x.category==='청약' ? {...x, category:'적금', assetId:'chung'} : x);
       // 기존 pCats에서 청약 제거, 적금에 assetId 없으면 유지
@@ -780,6 +799,7 @@ function switchMain(t) {
   document.getElementById('page-'+t).classList.add('active');
   const showSub = (t==='overview'||t==='transactions'||t==='settle');
   document.getElementById('subTabRow').style.display = showSub?'flex':'none';
+  if(t==='transactions') { txFilter='all'; renderTxFilter(); }
   applySubTab();
 }
 
@@ -789,6 +809,8 @@ function switchSub(s) {
     document.getElementById('st-'+x).className='stab'+(s===x?` active ${x}`:` ${x}`);
   });
   document.getElementById('fab').style.background=s==='personal'?'var(--p)':'var(--j)';
+  txFilter='all';
+  if(mainTab==='transactions') renderTxFilter();
   applySubTab();
 }
 
@@ -951,42 +973,103 @@ function renderCatList(type, list) {
 }
 
 // ── Transactions ─────────────────────────────
+// 필터 상태: 'all' | 'income' | 'expense' | 'date' | 'cat:카테고리명'
+let txFilter = 'all';
+
+function setTxFilter(f) {
+  txFilter = f;
+  renderTxFilter();
+  renderTx('personal');
+  renderTx('joint');
+}
+
+function renderTxFilter() {
+  const t = subTab;
+  const actCls = t==='personal' ? 'p-act' : 'j-act';
+  const catList = cats(t);
+  const filters = [
+    {id:'all',   label:'전체'},
+    {id:'date',  label:'일별'},
+    {id:'income',label:'수입'},
+    {id:'expense',label:'지출'},
+    ...catList.map(c=>({id:`cat:${c.name}`, label:`${c.emoji} ${c.name}`})),
+  ];
+  document.getElementById('txfilter').innerHTML = filters.map(f=>
+    `<button class="txftab${txFilter===f.id?' active '+actCls:''}" onclick="setTxFilter('${f.id}')">${f.label}</button>`
+  ).join('');
+}
+
+function txItemHtml(x, cl) {
+  const cat=cl.find(c=>c.name===x.category)||{};
+  const color=cat.color||'#9CA3AF';
+  const pm=x.payment==='card'?'<span class="badge b-card">카드</span>':x.payment==='account'?'<span class="badge b-acc">계좌</span>':'<span class="badge b-cash">현금</span>';
+  const assetDef = x.assetId ? DEF_ASSETS.find(a=>a.id===x.assetId) : null;
+  const assetBadge = assetDef ? `<span class="badge" style="background:${assetDef.color}22;color:${assetDef.color}">${assetDef.emoji} ${assetDef.name}</span>` : '';
+  const isIncome = (x.dir||'expense')==='income';
+  const incBadge = isIncome ? '<span class="badge b-income">수입</span>' : '';
+  const iconEmoji = assetDef ? assetDef.emoji : (cat.emoji||'❓');
+  const iconBg = isIncome ? 'var(--olt)' : `${color}22`;
+  return `<div class="txitem" onclick="deleteTx('${x.id}')">
+    <div class="txicon" style="background:${iconBg}">${iconEmoji}</div>
+    <div class="txbody">
+      <div class="txname">${x.desc}</div>
+      <div class="txmeta">${incBadge}${pm}<span class="badge" style="background:var(--s2);color:var(--muted)">${x.category}</span>${assetBadge}</div>
+    </div>
+    <div class="txamt" style="color:${isIncome?'var(--ok)':'var(--danger)'}">${isIncome?'+':''}${fmt(x.amount)}</div>
+  </div>`;
+}
+
 function renderTx(t) {
   const pfx=t==='personal'?'p':'j';
   const el=document.getElementById('tx-'+pfx);
-  const list=txOfMonth(t).sort((a,b)=>b.date.localeCompare(a.date));
-  if(!list.length){
-    el.innerHTML=`<div class="empty"><div class="icon">${t==='personal'?'👤':'👥'}</div><p>이번 달 지출 내역이 없어요</p></div>`;
+  const cl=cats(t);
+
+  // 전체 목록
+  let all=txOfMonth(t).sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id));
+
+  // 필터 적용
+  let filtered = all;
+  if (txFilter==='income')  filtered=all.filter(x=>(x.dir||'expense')==='income');
+  else if (txFilter==='expense') filtered=all.filter(x=>(x.dir||'expense')==='expense');
+  else if (txFilter.startsWith('cat:')) {
+    const catName=txFilter.slice(4);
+    filtered=all.filter(x=>x.category===catName);
+  }
+
+  if (!filtered.length) {
+    el.innerHTML=`<div class="empty"><div class="icon">${t==='personal'?'👤':'👥'}</div><p>해당 내역이 없어요</p></div>`;
     return;
   }
+
+  // 카테고리별 그룹
+  if (txFilter.startsWith('cat:') && txFilter!=='cat:') {
+    const catName=txFilter.slice(4);
+    const cat=cl.find(c=>c.name===catName)||{};
+    const total=filtered.reduce((s,x)=>s+(((x.dir||'expense')==='income')?-x.amount:x.amount),0);
+    let html=`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0 8px;border-bottom:2px solid var(--border);margin-bottom:4px;">
+      <span style="font-weight:600">${cat.emoji||'❓'} ${catName}</span>
+      <span style="font-family:'DM Mono',monospace;font-size:13px;color:${total<0?'var(--ok)':'var(--text)'}">${fmt(Math.abs(total))}</span>
+    </div>`;
+    filtered.forEach(x=>{ html+=txItemHtml(x,cl); });
+    el.innerHTML=html;
+    return;
+  }
+
+  // 일별 그룹 (전체/수입/지출/일별)
   const byDate={};
-  list.forEach(x=>{ if(!byDate[x.date]) byDate[x.date]=[]; byDate[x.date].push(x); });
-  const cl=cats(t);
+  filtered.forEach(x=>{ if(!byDate[x.date]) byDate[x.date]=[]; byDate[x.date].push(x); });
   let html='';
   Object.keys(byDate).sort((a,b)=>b.localeCompare(a)).forEach(date=>{
-    const [,,dd]=date.split('-');
-    const dt=byDate[date].reduce((s,x)=>s+x.amount,0);
-    html+=`<div class="txdh"><span>${parseInt(dd)}일</span><span>${fmt(dt)}</span></div>`;
-    byDate[date].forEach(x=>{
-      const cat=cl.find(c=>c.name===x.category)||{};
-      const color=cat.color||'#ccc';
-      const pm=x.payment==='card'?'<span class="badge b-card">카드</span>':x.payment==='account'?'<span class="badge b-acc">계좌</span>':'<span class="badge b-cash">현금</span>';
-      const assetDef = x.assetId ? DEF_ASSETS.find(a=>a.id===x.assetId) : null;
-      const assetBadge = assetDef ? `<span class="badge" style="background:${assetDef.color}22;color:${assetDef.color}">${assetDef.emoji} ${assetDef.name}</span>` : '';
-      const isIncome = (x.dir||'expense')==='income';
-      const incBadge = isIncome ? '<span class="badge b-income">수입</span>' : '';
-      const incCatDef = isIncome ? (cats(x.type).find(c=>c.name===x.category)||null) : null;
-      const iconEmoji = assetDef ? assetDef.emoji : (incCatDef ? incCatDef.emoji : (cat.emoji||'📦'));
-      const iconBg = isIncome ? 'var(--olt)' : `${color}22`;
-      html+=`<div class="txitem" onclick="deleteTx('${x.id}')">
-        <div class="txicon" style="background:${iconBg}">${iconEmoji}</div>
-        <div class="txbody">
-          <div class="txname">${x.desc}</div>
-          <div class="txmeta">${incBadge}${pm}<span class="badge" style="background:var(--s2);color:var(--muted)">${x.category}</span>${assetBadge}</div>
-        </div>
-        <div class="txamt" style="color:${isIncome?'var(--ok)':'var(--danger)'}">${isIncome?'+':''}${fmt(x.amount)}</div>
-      </div>`;
-    });
+    const [,mm,dd]=date.split('-');
+    const dayItems=byDate[date];
+    const dayExp=dayItems.filter(x=>(x.dir||'expense')==='expense').reduce((s,x)=>s+x.amount,0);
+    const dayInc=dayItems.filter(x=>(x.dir||'expense')==='income').reduce((s,x)=>s+x.amount,0);
+    let sumHtml='';
+    if(dayInc>0&&dayExp>0) sumHtml=`<span style="color:var(--ok)">+${fmt(dayInc)}</span> <span style="color:var(--danger)">-${fmt(dayExp)}</span>`;
+    else if(dayInc>0) sumHtml=`<span style="color:var(--ok)">+${fmt(dayInc)}</span>`;
+    else sumHtml=`<span>${fmt(dayExp)}</span>`;
+    html+=`<div class="txdh"><span>${parseInt(mm)}/${parseInt(dd)}</span><span style="font-size:11px">${sumHtml}</span></div>`;
+    dayItems.forEach(x=>{ html+=txItemHtml(x,cl); });
   });
   el.innerHTML=html;
 }
@@ -1193,6 +1276,7 @@ function saveAssetBal(assetId, val) {
   S.ms[S.month].assets[assetId] = parseFloat(val)||0;
   save();
   if (mainTab==='assets') renderAssets();
+  if (mainTab==='transactions') renderTxFilter();
 }
 
 let _st;
