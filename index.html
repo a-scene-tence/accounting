@@ -692,10 +692,37 @@ function ensureMonthBudgets(month) {
 function getMonthBudget(catName, type, month) {
   month = month || S.month;
   const snap = (S.ms[month]||{}).budgets;
+  const base = (snap && snap[type] && snap[type][catName] !== undefined)
+    ? snap[type][catName]
+    : (cats(type).find(c=>c.name===catName)
+        ? calcBudgetForSnapshot(cats(type).find(c=>c.name===catName), type, month)
+        : 0);
+  // 월평균 타입인 경우만 조정액 적용
+  const cat = cats(type).find(c=>c.name===catName);
+  if (!cat || cat.budgetType === 'fixed') return base;
+  const adj = ((S.ms[month]||{}).adjusts||{})[type]?.[catName] || 0;
+  return Math.max(0, base + adj);
+}
+
+function getMonthBudgetBase(catName, type, month) {
+  // 조정액 제외한 순수 스냅샷 예산 (설정 화면 표시용)
+  month = month || S.month;
+  const snap = (S.ms[month]||{}).budgets;
   if (snap && snap[type] && snap[type][catName] !== undefined) return snap[type][catName];
-  // 스냅샷 없으면 즉시 계산 (표시용)
   const cat = cats(type).find(c=>c.name===catName);
   return cat ? calcBudgetForSnapshot(cat, type, month) : 0;
+}
+
+function saveAdjust(type, catName, val) {
+  const month = S.month;
+  if (!S.ms[month]) S.ms[month] = {};
+  if (!S.ms[month].adjusts) S.ms[month].adjusts = {};
+  if (!S.ms[month].adjusts[type]) S.ms[month].adjusts[type] = {};
+  const n = parseFloat(val);
+  if (!n) delete S.ms[month].adjusts[type][catName];
+  else S.ms[month].adjusts[type][catName] = n;
+  save();
+  renderOv(type); renderSettle(type); renderBudgetSection(type);
 }
 
 function calcBudgetPreview(cat, type) {
@@ -1218,6 +1245,8 @@ function renderBudgetSection(type) {
         <span>원</span>
       </div>`;
     } else {
+      const adjVal = ((S.ms[S.month]||{}).adjusts||{})[type]?.[c.name] || '';
+      const adjColor = adjVal>0?'var(--danger)':adjVal<0?'var(--ok)':'var(--muted)';
       fieldsHtml=`<div class="brow-line">
         <span>기존평균</span>
         <input type="number" class="sinp sinp-sm" value="${c.seedAmt||''}" placeholder="0"
@@ -1227,7 +1256,16 @@ function renderBudgetSection(type) {
           onchange="updCatField('${type}',${i},'seedMonths',this.value)">
         <span>개월</span>
       </div>
-      <div style="font-size:10px;color:var(--muted);margin-top:2px">앱 기록 ${appMonths}개월 반영 · 총 ${totalM}개월${nextBud!==bud?"<b style='color:var(--p)'> → 다음달 "+fmt(nextBud)+"</b>":""}</div>`;
+      <div style="font-size:10px;color:var(--muted);margin-top:2px">앱 기록 ${appMonths}개월 반영 · 총 ${totalM}개월${nextBud!==bud?"<b style='color:var(--p)'> → 다음달 "+fmt(nextBud)+"</b>":""}</div>
+      <div class="brow-line" style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border)">
+        <span style="color:var(--muted)">당월 조정</span>
+        <input type="number" class="sinp sinp-sm" style="color:${adjColor};border-color:${adjVal?adjColor:'var(--border)'}"
+          value="${adjVal}" placeholder="0"
+          onchange="saveAdjust('${type}','${c.name}',this.value)"
+          title="이번 달만 예산을 추가(+) 또는 절감(-) 조정">
+        <span>원</span>
+        ${adjVal?`<span style="font-size:10px;color:${adjColor};font-weight:600">${adjVal>0?'+':''}${fmt(adjVal)} 반영</span>`:'<span style="font-size:10px;color:var(--muted)">±조정 가능</span>'}
+      </div>`;
     }
 
     // 미설정 카테고리는 삭제 불가
