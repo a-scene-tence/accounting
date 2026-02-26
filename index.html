@@ -157,6 +157,15 @@ main{flex:1;padding:16px;overflow-y:auto;padding-bottom:90px;}
 .btn-outline:hover{border-color:var(--p);color:var(--p);}
 .btn-outline.danger:hover{border-color:var(--danger);color:var(--danger);}
 
+/* ── Cat manage ── */
+.cat-add-row{display:flex;gap:6px;padding:10px 0 4px;border-top:1px dashed var(--border);margin-top:8px;}
+.cat-add-inp{flex:1;border:1.5px solid var(--border);border-radius:8px;padding:7px 10px;font-family:inherit;font-size:13px;background:var(--bg);color:var(--text);}
+.cat-add-inp:focus{outline:none;border-color:var(--p);}
+.cat-del-btn{background:none;border:none;font-size:16px;cursor:pointer;padding:4px 6px;color:var(--muted);line-height:1;}
+.cat-del-btn:hover{color:var(--danger);}
+.emoji-inp{width:46px;text-align:center;border:1.5px solid var(--border);border-radius:8px;padding:7px 4px;font-size:16px;font-family:inherit;background:var(--bg);color:var(--text);}
+.emoji-inp:focus{outline:none;border-color:var(--p);}
+
 /* ── Tx Filter ── */
 .txfilter{display:flex;gap:6px;padding:12px 0 8px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
 .txfilter::-webkit-scrollbar{display:none;}
@@ -711,11 +720,11 @@ function resetMonthBudgets(month) {
 
 function fixedTotal(type, month) {
   month = month || S.month;
-  return cats(type).reduce((s,c) => s + getMonthBudget(c.name, type, month), 0);
+  return cats(type).filter(c=>c.name!=='미설정').reduce((s,c) => s + getMonthBudget(c.name, type, month), 0);
 }
 
 function overBudget(type) {
-  return cats(type).reduce((s,c) => {
+  return cats(type).filter(c=>c.name!=='미설정').reduce((s,c) => {
     const bud = getMonthBudget(c.name, type);
     const net = catNetSpend(c.name, type); // 지출 - 수입
     return net > bud ? s+(net-bud) : s;
@@ -771,9 +780,11 @@ function calcJointRemain(ms) {
   const accIncome    = jIncList.filter(x=>x.payment==='account').reduce((s,x)=>s+x.amount,0);
   const cashIncome   = jIncList.filter(x=>x.payment==='cash').reduce((s,x)=>s+x.amount,0);
   const totalIncome  = accIncome + cashIncome;
+  // 실잔액 = 월초 - 지출 + 수입 (미설정 포함 전체 거래 반영)
+  const actualRemain = opening - totalSpent + totalIncome;
   return { opening, totalSpent, cardSpent, accSpent,
            accIncome, cashIncome, totalIncome,
-           remain: opening - totalSpent };  // 수입은 catNetSpend→overBudget에서 반영
+           remain: actualRemain };
 }
 
 // ═══════════════════════════════════════════════
@@ -886,11 +897,9 @@ function renderOv(t) {
 
   } else {
     const r = calcJointRemain(ms);
-    const jOver = overBudget('joint');
-    const jRemain = r.remain - jOver;
-    document.getElementById('j-amt').textContent=jRemain<0?`-${fmt(jRemain)}`:fmt(jRemain);
-    document.getElementById('j-amt').className='balamt'+(jRemain<0?' danger':'');
-    document.getElementById('j-lbl').textContent=jRemain<0?'초과':'잔액';
+    document.getElementById('j-amt').textContent=r.remain<0?`-${fmt(r.remain)}`:fmt(r.remain);
+    document.getElementById('j-amt').className='balamt'+(r.remain<0?' danger':'');
+    document.getElementById('j-lbl').textContent=r.remain<0?'초과':'잔액';
     document.getElementById('j-open').textContent=fmt(r.opening);
     document.getElementById('j-fixed').textContent=fmt(fixedTotal('joint'));
 
@@ -988,10 +997,7 @@ function renderTxFilter() {
   const actCls = t==='personal' ? 'p-act' : 'j-act';
   const catList = cats(t);
   const filters = [
-    {id:'all',   label:'전체'},
-    {id:'date',  label:'일별'},
-    {id:'income',label:'수입'},
-    {id:'expense',label:'지출'},
+    {id:'all', label:'전체'},
     ...catList.map(c=>({id:`cat:${c.name}`, label:`${c.emoji} ${c.name}`})),
   ];
   document.getElementById('txfilter').innerHTML = filters.map(f=>
@@ -1029,9 +1035,7 @@ function renderTx(t) {
 
   // 필터 적용
   let filtered = all;
-  if (txFilter==='income')  filtered=all.filter(x=>(x.dir||'expense')==='income');
-  else if (txFilter==='expense') filtered=all.filter(x=>(x.dir||'expense')==='expense');
-  else if (txFilter.startsWith('cat:')) {
+  if (txFilter.startsWith('cat:')) {
     const catName=txFilter.slice(4);
     filtered=all.filter(x=>x.category===catName);
   }
@@ -1042,7 +1046,7 @@ function renderTx(t) {
   }
 
   // 카테고리별 그룹
-  if (txFilter.startsWith('cat:') && txFilter!=='cat:') {
+  if (txFilter.startsWith('cat:')) {
     const catName=txFilter.slice(4);
     const cat=cl.find(c=>c.name===catName)||{};
     const total=filtered.reduce((s,x)=>s+(((x.dir||'expense')==='income')?-x.amount:x.amount),0);
@@ -1226,16 +1230,26 @@ function renderBudgetSection(type) {
       <div style="font-size:10px;color:var(--muted);margin-top:2px">앱 기록 ${appMonths}개월 반영 · 총 ${totalM}개월${nextBud!==bud?"<b style='color:var(--p)'> → 다음달 "+fmt(nextBud)+"</b>":""}</div>`;
     }
 
+    // 미설정 카테고리는 삭제 불가
+    const delBtn = c.name!=='미설정'
+      ? `<button class="cat-del-btn" onclick="delCat('${type}',${i})" title="카테고리 삭제">✕</button>`
+      : '';
     return `<div class="brow">
       <div class="brow-top">
         <span class="brow-name">${c.emoji} ${c.name}</span>
         <button class="brow-typebtn ${isFixed?'fixed':'avg'}"
           onclick="toggleBudgetType('${type}',${i})">${isFixed?'고정금액':'월평균'}</button>
         <span class="brow-result ${col}" title="당월 확정 예산">${bud>0?fmt(bud):'미설정'}</span>
+        ${delBtn}
       </div>
       <div class="brow-fields">${fieldsHtml}</div>
     </div>`;
-  }).join('');
+  }).join('') +
+  `<div class="cat-add-row">
+    <input class="emoji-inp" id="new-cat-emoji-${type}" placeholder="😊" maxlength="2">
+    <input class="cat-add-inp" id="new-cat-name-${type}" placeholder="카테고리 이름" maxlength="10">
+    <button class="brow-typebtn fixed" style="white-space:nowrap" onclick="addCat('${type}')">+ 추가</button>
+  </div>`;
 }
 
 // ═══════════════════════════════════════════════
@@ -1297,6 +1311,38 @@ function setAssetLink(catName, assetId) {
   else delete S.assetLinks[catName];
   save();
   if (mainTab==='assets') renderAssets();
+}
+
+function addCat(type) {
+  const emojiEl = document.getElementById(`new-cat-emoji-${type}`);
+  const nameEl  = document.getElementById(`new-cat-name-${type}`);
+  const emoji = emojiEl.value.trim() || '📦';
+  const name  = nameEl.value.trim();
+  if (!name) return alert('카테고리 이름을 입력하세요');
+  if (cats(type).find(c=>c.name===name)) return alert('이미 있는 카테고리 이름입니다');
+  const palette = type==='personal' ? PC : JC;
+  const color = palette[cats(type).length % palette.length];
+  // 미설정 바로 앞에 삽입
+  const arr = cats(type);
+  const unIdx = arr.findIndex(c=>c.name==='미설정');
+  const newCat = {name, emoji, budgetType:'avg', seedAmt:0, seedMonths:0, color};
+  if (unIdx>=0) arr.splice(unIdx, 0, newCat);
+  else arr.push(newCat);
+  resetMonthBudgets(S.month);
+  save(); render();
+  emojiEl.value=''; nameEl.value='';
+}
+
+function delCat(type, i) {
+  const c = cats(type)[i];
+  if (!c || c.name==='미설정') return;
+  if (!confirm(`"${c.name}" 카테고리를 삭제할까요?
+해당 카테고리의 기존 내역은 미설정으로 변경됩니다.`)) return;
+  // 기존 내역 → 미설정으로 변경
+  S.txs.forEach(x => { if(x.type===type && x.category===c.name) x.category='미설정'; });
+  cats(type).splice(i, 1);
+  resetMonthBudgets(S.month);
+  save(); render();
 }
 
 function updCatField(type,i,key,val) {
