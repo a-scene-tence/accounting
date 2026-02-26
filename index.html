@@ -617,6 +617,12 @@ function txOfMonthDir(t, dir, month) {
 }
 function catSpend(name, list) { return list.filter(x=>x.category===name).reduce((s,x)=>s+x.amount,0); }
 function catIncome(name, list) { return list.filter(x=>x.category===name).reduce((s,x)=>s+x.amount,0); }
+// 카테고리 순지출 = 지출 - 수입 (음수 가능)
+function catNetSpend(name, type) {
+  const spent  = catSpend(name, txOfMonthDir(type,'expense'));
+  const income = catSpend(name, txOfMonthDir(type,'income'));
+  return spent - income;
+}
 function getMs(month) { return S.ms[month||S.month]||{}; }
 
 // ── 누적 월평균 계산 ─────────────────────────────
@@ -690,11 +696,10 @@ function fixedTotal(type, month) {
 }
 
 function overBudget(type) {
-  const list = txOfMonthDir(type,'expense');
   return cats(type).reduce((s,c) => {
     const bud = getMonthBudget(c.name, type);
-    const sp = catSpend(c.name, list);
-    return sp > bud ? s+(sp-bud) : s;
+    const net = catNetSpend(c.name, type); // 지출 - 수입
+    return net > bud ? s+(net-bud) : s;
   }, 0);
 }
 
@@ -726,7 +731,7 @@ function calcPersonalRemain(ms) {
   const fixed = fixedTotal('personal');
   const totalOpening = accOpen + cashOpen;
   const over  = overBudget('personal');
-  const flex  = totalOpening + totalIncome - fixed - prevCard;
+  const flex  = totalOpening - fixed - prevCard;  // 수입은 catNetSpend→overBudget에서 반영
   const remain = flex - over;
   const totalActual = actualAccBal + actualCashBal;
   return { accOpen, cashOpen, prevCard, fixed, flex, remain, over,
@@ -749,7 +754,7 @@ function calcJointRemain(ms) {
   const totalIncome  = accIncome + cashIncome;
   return { opening, totalSpent, cardSpent, accSpent,
            accIncome, cashIncome, totalIncome,
-           remain: opening - totalSpent + totalIncome };
+           remain: opening - totalSpent };  // 수입은 catNetSpend→overBudget에서 반영
 }
 
 // ═══════════════════════════════════════════════
@@ -859,9 +864,11 @@ function renderOv(t) {
 
   } else {
     const r = calcJointRemain(ms);
-    document.getElementById('j-amt').textContent=r.remain<0?`-${fmt(r.remain)}`:fmt(r.remain);
-    document.getElementById('j-amt').className='balamt'+(r.remain<0?' danger':'');
-    document.getElementById('j-lbl').textContent=r.remain<0?'초과':'잔액';
+    const jOver = overBudget('joint');
+    const jRemain = r.remain - jOver;
+    document.getElementById('j-amt').textContent=jRemain<0?`-${fmt(jRemain)}`:fmt(jRemain);
+    document.getElementById('j-amt').className='balamt'+(jRemain<0?' danger':'');
+    document.getElementById('j-lbl').textContent=jRemain<0?'초과':'잔액';
     document.getElementById('j-open').textContent=fmt(r.opening);
     document.getElementById('j-fixed').textContent=fmt(fixedTotal('joint'));
 
@@ -917,20 +924,26 @@ function renderIncomeCatList(type, incList) {
 
 function renderCatList(type, list) {
   return cats(type).map(c=>{
-    const bud=getMonthBudget(c.name,type), sp=catSpend(c.name,list);
-    const pct=bud>0?Math.min(100,sp/bud*100):0;
-    const isOver=sp>bud&&bud>0;
+    const bud = getMonthBudget(c.name, type);
+    const sp  = catSpend(c.name, list);                  // 순수 지출
+    const inc = catSpend(c.name, txOfMonthDir(type,'income')); // 수입
+    const net = Math.max(0, sp - inc);                   // 순지출 (0 이하면 0)
+    const pct = bud>0 ? Math.min(100, net/bud*100) : 0;
+    const isOver = net>bud && bud>0;
     const typeBadge=c.budgetType==='fixed'
       ?`<span style="font-size:9px;color:#5555AA;background:#F0F0FF;padding:1px 5px;border-radius:8px;margin-left:4px">고정</span>`
       :`<span style="font-size:9px;color:var(--p);background:var(--plt);padding:1px 5px;border-radius:8px;margin-left:4px">평균</span>`;
+    const incBadgeRow = inc>0
+      ? `<span style="font-size:9px;color:var(--ok);background:var(--olt);padding:1px 5px;border-radius:8px;margin-left:4px">-${fmt(inc)}</span>`
+      : '';
     return `<div class="crow">
       <div class="cdot" style="background:${c.color}"></div>
       <div class="cinfo">
-        <div class="cname">${c.emoji} ${c.name}${typeBadge}</div>
+        <div class="cname">${c.emoji} ${c.name}${typeBadge}${incBadgeRow}</div>
         <div class="cbw"><div class="cbf" style="width:${pct}%;background:${isOver?'var(--danger)':c.color}"></div></div>
       </div>
       <div class="cright">
-        <div class="cspent" style="color:${isOver?'var(--danger)':'var(--text)'}">${fmt(sp)}</div>
+        <div class="cspent" style="color:${isOver?'var(--danger)':'var(--text)'}">${fmt(net)}${inc>0?`<span style="font-size:10px;color:var(--muted)"> (${fmt(sp)})</span>`:''}</div>
         <div class="cbudget">/ ${bud>0?fmt(bud):'미설정'}</div>
       </div>
     </div>`;
@@ -985,19 +998,22 @@ function renderSettle(t) {
   let totalBudget=0, totalSpent=0;
 
   const rows=cats(t).map(c=>{
-    const bud=getMonthBudget(c.name,t);
-    const sp=catSpend(c.name,list);
-    const diff=bud-sp; // 양수=절약, 음수=초과
-    totalBudget+=bud; totalSpent+=sp;
+    const bud = getMonthBudget(c.name,t);
+    const sp  = catSpend(c.name, list);
+    const inc = catSpend(c.name, txOfMonthDir(t,'income'));
+    const net = Math.max(0, sp - inc); // 순지출
+    const diff = bud - net; // 양수=절약, 음수=초과
+    totalBudget+=bud; totalSpent+=net;
     const diffCls=diff>=0?'plus':'minus';
     const typeBadge=c.budgetType==='fixed'
       ?`<span class="srow-type fixed">고정</span>`
       :`<span class="srow-type avg">평균</span>`;
+    const incNote = inc>0 ? `<span style="font-size:10px;color:var(--ok);margin-left:4px">-${fmt(inc)}</span>` : '';
     return `<div class="srow">
       <div class="srow-dot" style="background:${c.color}"></div>
-      <div class="srow-name">${c.emoji} ${c.name}${typeBadge}</div>
+      <div class="srow-name">${c.emoji} ${c.name}${typeBadge}${incNote}</div>
       <div class="srow-budget">${bud>0?fmt(bud):'-'}</div>
-      <div class="srow-spent" style="color:${sp>bud&&bud>0?'var(--danger)':'var(--text)'}">${fmt(sp)}</div>
+      <div class="srow-spent" style="color:${net>bud&&bud>0?'var(--danger)':'var(--text)'}">${fmt(net)}</div>
       <div class="srow-diff ${diffCls}">${bud>0?fmtDiff(diff):'-'}</div>
     </div>`;
   }).join('');
