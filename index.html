@@ -196,6 +196,16 @@ main{flex:1;padding:16px;overflow-y:auto;padding-bottom:90px;}
 .txftab.active{background:var(--text);color:var(--bg);}
 .txftab.p-act{background:var(--p);color:#fff;}
 .txftab.j-act{background:var(--j);color:#fff;}
+/* 검색 */
+.tx-search-wrap{display:flex;align-items:center;gap:8px;margin:4px 0 0;}
+.tx-search-inp{flex:1;background:var(--s2);border:1.5px solid var(--border);border-radius:10px;padding:9px 36px 9px 14px;font-size:13px;font-family:inherit;color:var(--text);outline:none;transition:border-color .15s;}
+.tx-search-inp:focus{border-color:var(--p);}
+.tx-search-wrap{position:relative;}
+.tx-search-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:14px;pointer-events:none;}
+.tx-search-inp{padding-left:34px;}
+.tx-search-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:14px;color:var(--muted);padding:2px;line-height:1;}
+.tx-search-count{font-size:11px;color:var(--muted);white-space:nowrap;padding-right:2px;}
+.tx-search-highlight{background:#FFE082;border-radius:2px;}
 .txdate-header{display:flex;justify-content:space-between;align-items:baseline;padding:8px 0 4px;border-bottom:1px solid var(--border);margin-bottom:2px;}
 .txdate-label{font-size:12px;font-weight:600;color:var(--muted);}
 .txdate-sum{font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);}
@@ -430,6 +440,11 @@ details[open].detail-box summary::after { content: " ▲"; }
   </div>
 
   <div class="txfilter" id="txfilter"></div>
+  <div class="tx-search-wrap">
+    <span class="tx-search-icon">🔍</span>
+    <input class="tx-search-inp" id="tx-search-inp" type="text" placeholder="내용, 카테고리, 금액으로 검색..." oninput="onTxSearch(this.value)">
+    <button class="tx-search-clear" id="tx-search-clear" onclick="clearTxSearch()" style="display:none">✕</button>
+  </div>
   <div id="tx-p"></div>
   <div id="tx-j" style="display:none"></div>
 </div>
@@ -1069,7 +1084,7 @@ function switchMain(t) {
   document.getElementById('page-'+t).classList.add('active');
   const showSub = (t==='overview'||t==='transactions'||t==='settle');
   document.getElementById('subTabRow').style.display = showSub?'flex':'none';
-  if(t==='transactions') { txFilter='all'; renderTxFilter(); }
+  if(t==='transactions') { txFilter='all'; txSearch=''; const inp=document.getElementById('tx-search-inp'); if(inp){inp.value='';} const clr=document.getElementById('tx-search-clear'); if(clr) clr.style.display='none'; renderTxFilter(); }
   applySubTab();
 }
 
@@ -1285,6 +1300,7 @@ function renderCatList(type, list) {
 // ── Transactions ─────────────────────────────
 // 필터 상태: 'all' | 'income' | 'expense' | 'date' | 'cat:카테고리명'
 let txFilter = 'all';
+let txSearch = '';
 
 function setTxFilter(f) {
   txFilter = f;
@@ -1308,6 +1324,12 @@ function renderTxFilter() {
   ).join('');
 }
 
+function highlight(text, q) {
+  if (!q) return text;
+  const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi');
+  return String(text).replace(re, '<mark class="tx-search-highlight">$1</mark>');
+}
+
 function txItemHtml(x, cl) {
   const cat=cl.find(c=>c.name===x.category)||{};
   const color=cat.color||'#9CA3AF';
@@ -1318,10 +1340,12 @@ function txItemHtml(x, cl) {
   const incBadge = isIncome ? '<span class="badge b-income">수입</span>' : '';
   const iconEmoji = assetDef ? assetDef.emoji : (cat.emoji||'❓');
   const iconBg = isIncome ? 'var(--olt)' : `${color}22`;
+  const q = txSearch.trim().toLowerCase();
+  const descHtml = highlight(x.desc, q);
   return `<div class="txitem" onclick="openEditModal('${x.id}')">
     <div class="txicon" style="background:${iconBg}">${iconEmoji}</div>
     <div class="txbody">
-      <div class="txname">${x.desc}</div>
+      <div class="txname">${descHtml}</div>
       <div class="txmeta">${incBadge}${pm}<span class="badge" style="background:var(--s2);color:var(--muted)">${x.category}</span>${assetBadge}</div>
     </div>
     <div class="txamt" style="color:${isIncome?'var(--ok)':'var(--danger)'}">${isIncome?'+':''}${fmt(x.amount)}</div>
@@ -1347,8 +1371,20 @@ function renderTx(t) {
     filtered=all.filter(x=>x.category===catName);
   }
 
+  // 검색 필터 적용
+  const q = txSearch.trim().toLowerCase();
+  if (q) {
+    filtered = filtered.filter(x =>
+      (x.desc||'').toLowerCase().includes(q) ||
+      (x.category||'').toLowerCase().includes(q) ||
+      String(x.amount).includes(q)
+    );
+  }
+
   if (!filtered.length) {
-    el.innerHTML=`<div class="empty"><div class="icon">${t==='personal'?'👤':'👥'}</div><p>해당 내역이 없어요</p></div>`;
+    el.innerHTML = txSearch
+      ? `<div class="empty"><div class="icon">🔍</div><p>"${txSearch}" 검색 결과가 없어요</p></div>`
+      : `<div class="empty"><div class="icon">${t==='personal'?'👤':'👥'}</div><p>해당 내역이 없어요</p></div>`;
     return;
   }
 
@@ -2107,6 +2143,24 @@ document.getElementById('liq-amount').addEventListener('input', updateLiqInfo);
 ensureMonthBudgets(S.month);
 switchSub('personal');
 render();
+// ═══════════════════════════════════════════════
+//  TX SEARCH
+// ═══════════════════════════════════════════════
+function onTxSearch(val) {
+  txSearch = val;
+  document.getElementById('tx-search-clear').style.display = val ? 'block' : 'none';
+  renderTx('personal');
+  renderTx('joint');
+}
+
+function clearTxSearch() {
+  txSearch = '';
+  document.getElementById('tx-search-inp').value = '';
+  document.getElementById('tx-search-clear').style.display = 'none';
+  renderTx('personal');
+  renderTx('joint');
+}
+
 // ═══════════════════════════════════════════════
 //  MONTH PICKER
 // ═══════════════════════════════════════════════
