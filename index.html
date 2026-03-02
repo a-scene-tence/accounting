@@ -26,7 +26,30 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:1
 .htitle{font-size:18px;font-weight:700;letter-spacing:-.3px;}
 .mnav{display:flex;align-items:center;gap:10px;}
 .mnav button{background:none;border:none;cursor:pointer;color:var(--muted);font-size:20px;padding:2px 6px;line-height:1;}
-.mlbl{font-family:'DM Mono',monospace;font-size:13px;font-weight:500;min-width:56px;text-align:center;}
+.mlbl{font-family:'DM Mono',monospace;font-size:13px;font-weight:500;min-width:56px;text-align:center;cursor:pointer;padding:4px 8px;border-radius:8px;transition:background .15s;}
+.mlbl:hover{background:var(--s2);}
+/* 월 피커 */
+#month-picker{position:fixed;top:0;left:0;right:0;bottom:0;z-index:200;display:none;}
+#month-picker.open{display:flex;align-items:flex-start;justify-content:center;}
+#month-picker-bg{position:absolute;inset:0;background:rgba(0,0,0,.3);}
+#month-picker-box{position:relative;z-index:1;background:var(--card);border-radius:20px;padding:20px;margin-top:80px;width:min(340px,90vw);box-shadow:var(--shadow);}
+.mpk-year{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;background:var(--s2);border-radius:12px;padding:4px 4px;}
+.mpk-year button{background:none;border:none;cursor:pointer;font-size:20px;color:var(--muted);padding:4px 12px;}
+.mpk-year span{font-weight:700;font-size:16px;}
+.mpk-months{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.mpk-m{padding:10px 0;border:1.5px solid var(--border);border-radius:10px;text-align:center;font-size:13px;font-weight:600;cursor:pointer;background:var(--bg);color:var(--text);transition:all .15s;}
+.mpk-m:hover{border-color:var(--p);color:var(--p);}
+.mpk-m.cur{background:var(--p);color:#fff;border-color:var(--p);}
+.mpk-m.has-data{border-color:var(--border);background:var(--s2);}
+/* 기간 합산 */
+#range-bar{background:var(--card);border-radius:12px;padding:10px 14px;margin-bottom:8px;display:none;}
+#range-bar.open{display:block;}
+.range-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.range-row input[type=date]{flex:1;min-width:120px;background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:12px;color:var(--text);font-family:inherit;}
+.range-row input[type=date]:focus{outline:none;border-color:var(--p);}
+.range-btn{padding:7px 12px;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;}
+.range-result{margin-top:8px;padding:10px 12px;background:var(--s2);border-radius:8px;font-size:12px;display:none;}
+.range-result.show{display:block;}
 .ntabs{display:flex;}
 .ntab{flex:1;padding:10px 4px;text-align:center;font-size:12px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;}
 .ntab.active{color:var(--p);border-bottom-color:var(--p);}
@@ -219,7 +242,7 @@ details[open].detail-box summary::after { content: " ▲"; }
     <span class="htitle">가계부</span>
     <div class="mnav">
       <button onclick="changeMonth(-1)">‹</button>
-      <span class="mlbl" id="monthLabel"></span>
+      <span class="mlbl" id="monthLabel" onclick="openMonthPicker()"></span>
       <button onclick="changeMonth(1)">›</button>
     </div>
   </div>
@@ -390,6 +413,22 @@ details[open].detail-box summary::after { content: " ▲"; }
       </div>
     </div>
   </div>
+
+  <!-- 기간 합산 -->
+  <div style="display:flex;justify-content:flex-end;padding:4px 0 2px;">
+    <button onclick="toggleRangeBar()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;">📅 기간 합산</button>
+  </div>
+  <div id="range-bar">
+    <div class="range-row">
+      <input type="date" id="range-from">
+      <span style="font-size:12px;color:var(--muted);">~</span>
+      <input type="date" id="range-to">
+      <button class="range-btn" style="background:var(--p);color:#fff;" onclick="calcRange()">계산</button>
+      <button class="range-btn" style="background:var(--s2);color:var(--muted);" onclick="clearRange()">초기화</button>
+    </div>
+    <div class="range-result" id="range-result"></div>
+  </div>
+
   <div class="txfilter" id="txfilter"></div>
   <div id="tx-p"></div>
   <div id="tx-j" style="display:none"></div>
@@ -600,6 +639,19 @@ details[open].detail-box summary::after { content: " ▲"; }
 
     <button class="bsub" id="bsub" onclick="saveTx()" style="padding:16px; font-size:16px; border-radius:14px;">지출 추가</button>
     <button id="bsub-del" onclick="deleteTxFromModal()" style="display:none;width:100%;padding:14px;border:none;background:var(--dlt);color:var(--danger);border-radius:14px;font-size:15px;font-weight:700;cursor:pointer;margin-top:10px;">🗑 내역 삭제</button>
+  </div>
+</div>
+
+<!-- ══ MONTH PICKER ══ -->
+<div id="month-picker">
+  <div id="month-picker-bg" onclick="closeMonthPicker()"></div>
+  <div id="month-picker-box">
+    <div class="mpk-year">
+      <button onclick="mpkChangeYear(-1)">‹</button>
+      <span id="mpk-year-label">2025</span>
+      <button onclick="mpkChangeYear(1)">›</button>
+    </div>
+    <div class="mpk-months" id="mpk-months"></div>
   </div>
 </div>
 
@@ -1046,7 +1098,8 @@ function applySubTab() {
 //  RENDER
 // ═══════════════════════════════════════════════
 function render() {
-  document.getElementById('monthLabel').textContent=parseInt(S.month.split('-')[1])+'월';
+  const [y,m] = S.month.split('-');
+  document.getElementById('monthLabel').textContent = `${y}년 ${parseInt(m)}월`;
   renderOv('personal'); renderOv('joint');
   renderTx('personal'); renderTx('joint');
   renderSettle('personal'); renderSettle('joint');
@@ -2054,6 +2107,117 @@ document.getElementById('liq-amount').addEventListener('input', updateLiqInfo);
 ensureMonthBudgets(S.month);
 switchSub('personal');
 render();
+// ═══════════════════════════════════════════════
+//  MONTH PICKER
+// ═══════════════════════════════════════════════
+let mpkYear = new Date().getFullYear();
+
+function openMonthPicker() {
+  mpkYear = parseInt(S.month.split('-')[0]);
+  renderMonthPicker();
+  document.getElementById('month-picker').classList.add('open');
+}
+
+function closeMonthPicker() {
+  document.getElementById('month-picker').classList.remove('open');
+}
+
+function mpkChangeYear(d) {
+  mpkYear += d;
+  renderMonthPicker();
+}
+
+function renderMonthPicker() {
+  document.getElementById('mpk-year-label').textContent = mpkYear + '년';
+  const curMonth = S.month;
+  const months = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+  // 데이터가 있는 달 계산
+  const hasTxData = new Set(S.txs.map(x=>x.date.slice(0,7)));
+  const hasMsData = new Set(Object.keys(S.ms));
+  document.getElementById('mpk-months').innerHTML = months.map((label, i) => {
+    const mm = String(i+1).padStart(2,'0');
+    const key = `${mpkYear}-${mm}`;
+    const isCur = key === curMonth;
+    const hasData = hasTxData.has(key) || hasMsData.has(key);
+    return `<div class="mpk-m${isCur?' cur':hasData?' has-data':''}" onclick="selectMonth('${key}')">${label}</div>`;
+  }).join('');
+}
+
+function selectMonth(key) {
+  S.month = key;
+  ensureMonthBudgets(S.month);
+  save(); render();
+  closeMonthPicker();
+}
+
+// ═══════════════════════════════════════════════
+//  RANGE SUM (기간 합산)
+// ═══════════════════════════════════════════════
+function toggleRangeBar() {
+  const bar = document.getElementById('range-bar');
+  bar.classList.toggle('open');
+  if (bar.classList.contains('open')) {
+    // 기본값: 현재 달 1일 ~ 말일
+    const [y, m] = S.month.split('-');
+    const lastDay = new Date(parseInt(y), parseInt(m), 0).getDate();
+    document.getElementById('range-from').value = `${S.month}-01`;
+    document.getElementById('range-to').value   = `${S.month}-${String(lastDay).padStart(2,'0')}`;
+    document.getElementById('range-result').classList.remove('show');
+  }
+}
+
+function calcRange() {
+  const from = document.getElementById('range-from').value;
+  const to   = document.getElementById('range-to').value;
+  if (!from || !to || from > to) {
+    alert('날짜 범위를 올바르게 입력해주세요.'); return;
+  }
+  const t = subTab;
+  const filtered = S.txs.filter(x => x.type===t && x.date >= from && x.date <= to);
+  const income  = filtered.filter(x=>(x.dir||'expense')==='income').reduce((s,x)=>s+x.amount,0);
+  const expense = filtered.filter(x=>(x.dir||'expense')==='expense').reduce((s,x)=>s+x.amount,0);
+  const net = expense - income;
+  const cnt = filtered.length;
+
+  // 카테고리별 집계
+  const catMap = {};
+  filtered.filter(x=>(x.dir||'expense')==='expense').forEach(x=>{
+    catMap[x.category] = (catMap[x.category]||0) + x.amount;
+  });
+  const topCats = Object.entries(catMap).sort((a,b)=>b[1]-a[1]).slice(0,3);
+  const topHtml = topCats.map(([name,amt])=>`<span style="margin-right:8px">${name} <b>${fmt(amt)}</b></span>`).join('');
+
+  const resEl = document.getElementById('range-result');
+  resEl.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <span style="font-weight:700;color:var(--text)">${from} ~ ${to}</span>
+      <span style="font-size:11px;color:var(--muted)">${cnt}건</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">
+      <div style="text-align:center;padding:6px;background:var(--card);border-radius:8px;">
+        <div style="font-size:10px;color:var(--muted)">지출</div>
+        <div style="font-size:13px;font-weight:700;font-family:'DM Mono',monospace;color:var(--text)">${fmt(expense)}</div>
+      </div>
+      <div style="text-align:center;padding:6px;background:var(--card);border-radius:8px;">
+        <div style="font-size:10px;color:var(--muted)">수입</div>
+        <div style="font-size:13px;font-weight:700;font-family:'DM Mono',monospace;color:var(--ok)">+${fmt(income)}</div>
+      </div>
+      <div style="text-align:center;padding:6px;background:var(--card);border-radius:8px;">
+        <div style="font-size:10px;color:var(--muted)">순지출</div>
+        <div style="font-size:13px;font-weight:700;font-family:'DM Mono',monospace;color:${net>0?'var(--danger)':'var(--ok)'}">${net>0?'':'+'}${fmt(Math.abs(net))}</div>
+      </div>
+    </div>
+    ${topCats.length?`<div style="font-size:11px;color:var(--muted)">주요 지출: ${topHtml}</div>`:''}
+  `;
+  resEl.classList.add('show');
+}
+
+function clearRange() {
+  document.getElementById('range-from').value = '';
+  document.getElementById('range-to').value   = '';
+  document.getElementById('range-result').classList.remove('show');
+}
+
 // ═══════════════════════════════════════════════
 //  ONBOARDING WIZARD
 // ═══════════════════════════════════════════════
