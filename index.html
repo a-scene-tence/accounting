@@ -243,6 +243,19 @@ details.detail-box summary { list-style: none; text-align: center; display: inli
 details.detail-box summary:hover { background: var(--border); }
 details.detail-box summary::after { content: " ▼"; font-size: 10px; margin-left: 4px; color: var(--muted); }
 details[open].detail-box summary::after { content: " ▲"; }
+/* ── Calendar View ── */
+.cal-view { margin-bottom: 16px; background: var(--card); border-radius: 16px; padding: 16px; box-shadow: var(--shadow); }
+.cal-header { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 11px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-cell { aspect-ratio: 0.8; padding: 4px 2px; border-radius: 8px; border: 1.5px solid transparent; display: flex; flex-direction: column; align-items: center; cursor: pointer; transition: all 0.15s; background: var(--s2); }
+.cal-cell.active { border-color: var(--p); background: var(--plt); }
+.cal-cell:hover:not(.empty) { border-color: var(--border); }
+.cal-cell.empty { background: transparent; cursor: default; }
+.cal-date { font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+.cal-inc, .cal-exp { font-family: 'DM Mono', monospace; font-size: 9px; width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; font-weight: 600; }
+.cal-inc { color: var(--ok); }
+.cal-exp { color: var(--danger); }
+.cal-today { background: var(--text); color: var(--bg); border-radius: 6px; padding: 0 5px; }
 </style>
 </head>
 <body>
@@ -425,8 +438,12 @@ details[open].detail-box summary::after { content: " ▲"; }
   </div>
 
   <!-- 기간 합산 -->
-  <div style="display:flex;justify-content:flex-end;padding:4px 0 2px;">
-    <button onclick="toggleRangeBar()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;">📅 기간 합산</button>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0 2px;">
+    <div class="tg" style="width:auto;gap:2px;padding:3px;border-radius:10px;">
+      <button class="tb active" id="view-list" onclick="setTxView('list')" style="padding:5px 12px;font-size:11px;font-weight:600;">📄 리스트</button>
+      <button class="tb" id="view-cal" onclick="setTxView('calendar')" style="padding:5px 12px;font-size:11px;font-weight:600;">📅 캘린더</button>
+    </div>
+    <button onclick="toggleRangeBar()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;">📅 기간 합산</button>
   </div>
   <div id="range-bar">
     <div class="range-row">
@@ -1298,15 +1315,22 @@ function renderCatList(type, list) {
 }
 
 // ── Transactions ─────────────────────────────
-// 필터 상태: 'all' | 'income' | 'expense' | 'date' | 'cat:카테고리명'
 let txFilter = 'all';
 let txSearch = '';
+let txViewMode = 'list';
+let txSelectedDate = null;
+
+function setTxView(mode) {
+  txViewMode = mode;
+  document.getElementById('view-list').classList.toggle('active', mode==='list');
+  document.getElementById('view-cal').classList.toggle('active', mode==='calendar');
+  renderTx('personal'); renderTx('joint');
+}
 
 function setTxFilter(f) {
   txFilter = f;
   renderTxFilter();
-  renderTx('personal');
-  renderTx('joint');
+  renderTx('personal'); renderTx('joint');
 }
 
 function renderTxFilter() {
@@ -1326,7 +1350,7 @@ function renderTxFilter() {
 
 function highlight(text, q) {
   if (!q) return text;
-  const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi');
+  const re = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi');
   return String(text).replace(re, '<mark class="tx-search-highlight">$1</mark>');
 }
 
@@ -1352,26 +1376,68 @@ function txItemHtml(x, cl) {
   </div>`;
 }
 
+function fmtComp(n) {
+  if (n >= 10000) return Math.round(n/10000) + '만';
+  if (n >= 1000)  return Math.round(n/1000)  + '천';
+  return n.toLocaleString();
+}
+
+function renderCalendar(items) {
+  const [y, m] = S.month.split('-').map(Number);
+  const firstDay = new Date(y, m-1, 1).getDay();
+  const lastDate  = new Date(y, m, 0).getDate();
+  const byDate = {};
+  items.forEach(x => {
+    if (!byDate[x.date]) byDate[x.date] = { inc:0, exp:0 };
+    if ((x.dir||'expense')==='income') byDate[x.date].inc += x.amount;
+    else                               byDate[x.date].exp += x.amount;
+  });
+  const days = ['일','월','화','수','목','금','토'];
+  let html = `<div class="cal-view">`;
+  html += `<div class="cal-header">${days.map(d=>`<div>${d}</div>`).join('')}</div>`;
+  html += `<div class="cal-grid">`;
+  for (let i=0; i<firstDay; i++) html += `<div class="cal-cell empty"></div>`;
+  const today = todayStr();
+  for (let d=1; d<=lastDate; d++) {
+    const ds = `${S.month}-${String(d).padStart(2,'0')}`;
+    const dd = byDate[ds];
+    const isToday    = ds === today;
+    const isSelected = ds === txSelectedDate;
+    let inner = `<div class="cal-date${isToday?' cal-today':''}">${d}</div>`;
+    if (dd) {
+      if (dd.inc > 0) inner += `<div class="cal-inc">+${fmtComp(dd.inc)}</div>`;
+      if (dd.exp > 0) inner += `<div class="cal-exp">-${fmtComp(dd.exp)}</div>`;
+    }
+    html += `<div class="cal-cell${isSelected?' active':''}" onclick="selectCalDate('${ds}')">${inner}</div>`;
+  }
+  html += `</div></div>`;
+  return html;
+}
+
+window.selectCalDate = function(dateStr) {
+  txSelectedDate = (txSelectedDate === dateStr) ? null : dateStr;
+  renderTx('personal'); renderTx('joint');
+};
+
 function renderTx(t) {
-  const pfx=t==='personal'?'p':'j';
-  const el=document.getElementById('tx-'+pfx);
-  const cl=cats(t);
+  const pfx = t==='personal'?'p':'j';
+  const el  = document.getElementById('tx-'+pfx);
+  const cl  = cats(t);
 
-  // 전체 목록
-  let all=txOfMonth(t).sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id));
+  if (txSelectedDate && !txSelectedDate.startsWith(S.month)) txSelectedDate = null;
 
-  // 필터 적용
+  let all = txOfMonth(t).sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id));
+
+  // 카테고리/유형 필터
   let filtered = all;
-  if (txFilter==='income') {
-    filtered=all.filter(x=>(x.dir||'expense')==='income');
-  } else if (txFilter==='expense') {
-    filtered=all.filter(x=>(x.dir||'expense')==='expense');
-  } else if (txFilter.startsWith('cat:')) {
-    const catName=txFilter.split(':')[1];
-    filtered=all.filter(x=>x.category===catName);
+  if      (txFilter==='income')  filtered = all.filter(x=>(x.dir||'expense')==='income');
+  else if (txFilter==='expense') filtered = all.filter(x=>(x.dir||'expense')==='expense');
+  else if (txFilter.startsWith('cat:')) {
+    const catName = txFilter.split(':')[1];
+    filtered = all.filter(x=>x.category===catName);
   }
 
-  // 검색 필터 적용
+  // 검색어 필터
   const q = txSearch.trim().toLowerCase();
   if (q) {
     filtered = filtered.filter(x =>
@@ -1381,6 +1447,29 @@ function renderTx(t) {
     );
   }
 
+  // ── 캘린더 뷰 ──
+  if (txViewMode === 'calendar') {
+    let html = renderCalendar(filtered);
+    if (txSelectedDate) {
+      const dateFiltered = filtered.filter(x => x.date === txSelectedDate);
+      const [,mm,dd2] = txSelectedDate.split('-');
+      html += `<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid var(--border);padding-bottom:8px;margin-bottom:8px;">
+        <span style="font-weight:700;font-size:15px;">${parseInt(mm)}월 ${parseInt(dd2)}일 내역</span>
+        <button onclick="selectCalDate('${txSelectedDate}')" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;">✕ 닫기</button>
+      </div>`;
+      if (dateFiltered.length) {
+        dateFiltered.forEach(x => { html += txItemHtml(x, cl); });
+      } else {
+        html += `<div class="empty" style="padding:24px 20px"><p>이 날짜엔 내역이 없어요</p></div>`;
+      }
+    } else {
+      html += `<div class="empty" style="padding:24px 20px"><div style="font-size:24px;margin-bottom:8px">👆</div><p>날짜를 탭하면<br>상세 내역을 확인할 수 있어요</p></div>`;
+    }
+    el.innerHTML = html;
+    return;
+  }
+
+  // ── 리스트 뷰 ──
   if (!filtered.length) {
     el.innerHTML = txSearch
       ? `<div class="empty"><div class="icon">🔍</div><p>"${txSearch}" 검색 결과가 없어요</p></div>`
@@ -1388,80 +1477,71 @@ function renderTx(t) {
     return;
   }
 
-  // 날짜별 그룹 렌더링 헬퍼
   function renderByDate(items) {
-    const byDate={};
+    const byDate = {};
     items.forEach(x=>{ if(!byDate[x.date]) byDate[x.date]=[]; byDate[x.date].push(x); });
-    let h='';
+    let h = '';
     Object.keys(byDate).sort((a,b)=>b.localeCompare(a)).forEach(date=>{
-      const [,mm,dd]=date.split('-');
-      const dayItems=byDate[date].sort((a,b)=>b.amount-a.amount);
-      const dayExp=dayItems.filter(x=>(x.dir||'expense')==='expense').reduce((s,x)=>s+x.amount,0);
-      const dayInc=dayItems.filter(x=>(x.dir||'expense')==='income').reduce((s,x)=>s+x.amount,0);
-      let sumHtml='';
-      if(dayInc>0&&dayExp>0) sumHtml=`<span style="color:var(--ok)">+${fmt(dayInc)}</span> <span style="color:var(--danger)">-${fmt(dayExp)}</span>`;
-      else if(dayInc>0) sumHtml=`<span style="color:var(--ok)">+${fmt(dayInc)}</span>`;
-      else sumHtml=`<span>${fmt(dayExp)}</span>`;
-      h+=`<div class="txdh"><span>${parseInt(mm)}/${parseInt(dd)}</span><span style="font-size:11px">${sumHtml}</span></div>`;
-      dayItems.forEach(x=>{ h+=txItemHtml(x,cl); });
+      const [,mm,dd2] = date.split('-');
+      const dayItems = byDate[date].sort((a,b)=>b.amount-a.amount);
+      const dayExp = dayItems.filter(x=>(x.dir||'expense')==='expense').reduce((s,x)=>s+x.amount,0);
+      const dayInc = dayItems.filter(x=>(x.dir||'expense')==='income').reduce((s,x)=>s+x.amount,0);
+      let sumHtml = '';
+      if      (dayInc>0 && dayExp>0) sumHtml = `<span style="color:var(--ok)">+${fmt(dayInc)}</span> <span style="color:var(--danger)">-${fmt(dayExp)}</span>`;
+      else if (dayInc>0)             sumHtml = `<span style="color:var(--ok)">+${fmt(dayInc)}</span>`;
+      else                           sumHtml = `<span>${fmt(dayExp)}</span>`;
+      h += `<div class="txdh"><span>${parseInt(mm)}/${parseInt(dd2)}</span><span style="font-size:11px">${sumHtml}</span></div>`;
+      dayItems.forEach(x=>{ h += txItemHtml(x, cl); });
     });
     return h;
   }
 
-  // 수입/지출 필터 헤더
   if (txFilter==='income' || txFilter==='expense') {
     const isInc = txFilter==='income';
     const total = filtered.reduce((s,x)=>s+x.amount, 0);
-    let html=`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0 8px;border-bottom:2px solid var(--border);margin-bottom:4px;">
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0 8px;border-bottom:2px solid var(--border);margin-bottom:4px;">
       <span style="font-weight:600">${isInc?'📈 수입':'📉 지출'}</span>
       <span style="font-family:'DM Mono',monospace;font-size:13px;color:${isInc?'var(--ok)':'var(--danger)'}">${isInc?'+':''}${fmt(total)}</span>
     </div>`;
     html += renderByDate(filtered);
-    el.innerHTML=html;
+    el.innerHTML = html;
     return;
   }
 
-  // 카테고리별 그룹
   if (txFilter.startsWith('cat:')) {
-    const parts = txFilter.split(':');
+    const parts   = txFilter.split(':');
     const catName = parts[1];
-    const dirSub = parts[2] || 'all';
-    const cat = cl.find(c=>c.name===catName)||{};
-
+    const dirSub  = parts[2] || 'all';
+    const cat     = cl.find(c=>c.name===catName)||{};
     let catFiltered = filtered;
-    if (dirSub==='income') catFiltered = filtered.filter(x=>(x.dir||'expense')==='income');
+    if      (dirSub==='income')  catFiltered = filtered.filter(x=>(x.dir||'expense')==='income');
     else if (dirSub==='expense') catFiltered = filtered.filter(x=>(x.dir||'expense')==='expense');
-
     const totalExp = filtered.filter(x=>(x.dir||'expense')==='expense').reduce((s,x)=>s+x.amount,0);
     const totalInc = filtered.filter(x=>(x.dir||'expense')==='income').reduce((s,x)=>s+x.amount,0);
-    const net = totalExp - totalInc;
-
-    const actCls2 = subTab==='personal'?'p-act':'j-act';
+    const net      = totalExp - totalInc;
+    const actCls2  = subTab==='personal'?'p-act':'j-act';
     const subBtnCls = (d) => `txftab${dirSub===d?' active '+actCls2:''}`;
-
-    let html=`<div style="padding:10px 0 8px;border-bottom:2px solid var(--border);margin-bottom:8px;">
+    let html = `<div style="padding:10px 0 8px;border-bottom:2px solid var(--border);margin-bottom:8px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <span style="font-weight:600">${cat.emoji||'❓'} ${catName}</span>
         <span style="font-family:'DM Mono',monospace;font-size:13px;color:${net<0?'var(--ok)':'var(--text)'}">${net<0?'+'+fmt(totalInc-totalExp):fmt(net)}</span>
       </div>
       <div style="display:flex;gap:6px;font-size:12px">
-        <button class="${subBtnCls('all')}" onclick="setTxFilter('cat:${catName}')">전체</button>
-        <button class="${subBtnCls('income')}" onclick="setTxFilter('cat:${catName}:income')">📈 수입 +${fmt(totalInc)}</button>
+        <button class="${subBtnCls('all')}"     onclick="setTxFilter('cat:${catName}')">전체</button>
+        <button class="${subBtnCls('income')}"  onclick="setTxFilter('cat:${catName}:income')">📈 수입 +${fmt(totalInc)}</button>
         <button class="${subBtnCls('expense')}" onclick="setTxFilter('cat:${catName}:expense')">📉 지출 ${fmt(totalExp)}</button>
       </div>
     </div>`;
-    if (!catFiltered.length) {
-      html += `<div class="empty"><div class="icon">📭</div><p>해당 내역이 없어요</p></div>`;
-    } else {
-      html += renderByDate(catFiltered);
-    }
-    el.innerHTML=html;
+    html += catFiltered.length
+      ? renderByDate(catFiltered)
+      : `<div class="empty"><div class="icon">📭</div><p>해당 내역이 없어요</p></div>`;
+    el.innerHTML = html;
     return;
   }
 
-  // 전체 일별 그룹
-  el.innerHTML=renderByDate(filtered);
+  el.innerHTML = renderByDate(filtered);
 }
+
 
 // ── Settle ───────────────────────────────────
 function renderSettle(t) {
